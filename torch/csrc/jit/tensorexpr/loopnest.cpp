@@ -2386,7 +2386,7 @@ void LoopNest::compressBuffer(BufPtr buf, StmtPtr stmt) {
 
 void LoopNest::compressAllBuffers(StmtPtr stmt) {
   for (auto buf : BufFinder::find(stmt)) {
-    compressBuffer(const_cast<BufPtr>(buf), stmt);
+    compressBuffer(buf, stmt);
   }
 }
 
