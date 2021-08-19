@@ -146,6 +146,12 @@ class BasePruner(BaseSparsifier):
                 del module._buffers['mask']
             delattr(module, 'mask')
 
+    def get_module_pruned_outputs(self, module):
+        r"""Returns the set of pruned indices of module"""
+        assert parametrize.is_parametrized(module)  # can only get pruned indices of pruned module
+        assert module in {config['module'] for config in self.module_groups}  # check that module is in pruner.module_groups
+        return module.parametrizations.weight[0].pruned_outputs  # assume only one parametrization attached
+
     def manual_mask_update(self, module, pruned_outputs):
         r"""Updates mask of module with user-provided pruned outputs"""
         param = module.parametrizations.weight[0]
