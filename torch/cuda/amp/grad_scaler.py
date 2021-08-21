@@ -110,7 +110,8 @@ class GradScaler(object):
                  growth_factor=2.0,
                  backoff_factor=0.5,
                  growth_interval=2000,
-                 enabled=True):
+                 enabled=True,
+                 use_zero_grad=False):
         if enabled and amp_definitely_not_available():
             warnings.warn("torch.cuda.amp.GradScaler is enabled, but CUDA is not available.  Disabling.")
             self._enabled = False
@@ -131,6 +132,7 @@ class GradScaler(object):
             # self._growth_tracker will be lazily initialized during the first call to scale()
             self._growth_tracker = None
             self._per_optimizer_states = defaultdict(_refresh_per_optimizer_state)
+            self.use_zero_grad = use_zero_grad
 
     def _check_scale_growth_tracker(self, funcname) -> Tuple[torch.Tensor, torch.Tensor]:
         fix = "This may indicate your script did not use scaler.scale(loss or outputs) earlier in the iteration."
@@ -281,8 +283,26 @@ class GradScaler(object):
 
     def _maybe_opt_step(self, optimizer, optimizer_state, *args, **kwargs):
         retval = None
-        if not sum(v.item() for v in optimizer_state["found_inf_per_device"].values()):
+        if self.use_zero_grad:
+            def _fetch_gradients(optimizer):
+                gradients = []
+                for param_group in optimizer.__getstate__()['param_groups']:
+                    for group, params in param_group.items():
+                        if group == 'params':
+                            for p in params:
+                                if isinstance(p, torch.Tensor) and p.grad is not None:
+                                    gradients.append(p.grad.data)
+                return gradients
+            found_inf = torch.stack(
+                tuple(optimizer_state["found_inf_per_device"].values())).sum()
+            if found_inf:
+                for grad in xm._fetch_gradients(optimizer):
+                    grad.nan_to_num_()
+                    grad.mul_(0)
             retval = optimizer.step(*args, **kwargs)
+        else:
+            if not sum(v.item() for v in optimizer_state["found_inf_per_device"].values()):
+                retval = optimizer.step(*args, **kwargs)
         return retval
 
     def step(self, optimizer, *args, **kwargs):
