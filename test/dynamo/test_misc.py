@@ -4533,6 +4533,44 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         ):
             torch._dynamo.optimize("eager")(my_dyn_fn)(y)
 
+    def test_grad_checkpointing(self):
+        import torch.utils.checkpoint as checkpoint
+
+        class Foo(torch.nn.Module):
+
+            def __init__(self):
+                super(Foo, self).__init__()
+                self.linears = torch.nn.ModuleList([
+                    torch.nn.Linear(10, 20),
+                    torch.nn.Dropout(),
+                    torch.nn.Linear(20, 20),
+                    torch.nn.Dropout(),
+                    torch.nn.Linear(20, 10),
+                ])
+
+            def forward(self, x):
+                for i, mod in enumerate(self.linears):
+                    if i > 0:
+                        x = checkpoint.checkpoint(mod, x)
+                    else:
+                        x = mod(x)
+                return x
+
+        mod = Foo()
+        mod_opt = torch._dynamo.optimize("eager")(mod)
+
+        x = torch.randn(10).requires_grad_()
+        state = torch.get_rng_state()
+        y_opt = mod_opt(x)
+        y_opt.sum().backward()
+        grad_opt = x.grad
+        torch.set_rng_state(state)
+        y = mod(x)
+        y.sum().backward()
+        grad = x.grad
+
+        self.assertEqual(y, y_opt)
+        self.assertEqual(grad, grad_opt)
 
 class CustomFunc1(torch.autograd.Function):
     @staticmethod

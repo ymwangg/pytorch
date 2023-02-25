@@ -373,6 +373,7 @@ class TorchVariable(VariableTracker):
                     *proxy_args_kwargs(args, kwargs),
                 ),
                 example_value=self.value(),
+                source=self.source,
                 **options,
             )
         if (
