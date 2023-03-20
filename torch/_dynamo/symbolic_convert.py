@@ -248,11 +248,12 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
 
             # Manually insert torch._assert instead of python assert and jump over
             # assert related instructions as we don't need them anymore.
-            self.output.create_proxy(
+            proxy = self.output.create_proxy(
                 "call_function",
                 torch._assert,
                 *proxy_args_kwargs((value, error_msg), {}),
             )
+            torch._dynamo.utils.get_fake_value(proxy.node, self)
             self.jump(inst)
             return
 
