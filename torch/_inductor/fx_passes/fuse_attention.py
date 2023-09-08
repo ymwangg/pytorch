@@ -377,6 +377,29 @@ def _sfdp_replacement_15(query, key, value, inv_scale):
         scale=1.0 / inv_scale,
     )
 
+def _sfdp_pattern_16(query, key, value):
+    # dropout would create a clone() if eval() or p = 0
+    div = torch.matmul(query, key.transpose(2, 3)) / math.sqrt(query.size(-1))
+    # attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query.dtype)
+    div = div.to(torch.float32)
+    attn_weights = torch.softmax(div, dim=-1)
+    attn_weights = attn_weights.to(torch.float16)
+    # attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1)
+    res = torch.matmul(attn_weights, value)
+    return res
+
+def _sfdp_replacement_16(query, key, value):
+    counters["inductor"]["fuse_attention"] += 1
+    return aten.scaled_dot_product_attention(
+        query,
+        key,
+        value,
+        attn_mask=None,
+        dropout_p=0.0,
+        is_causal=False,
+        scale=1.0 / math.sqrt(query.size(-1)),
+    )
+
 
 def _sfdp_params_check(match):
     assert all(k in match.kwargs for k in ("query", "key", "value"))
@@ -402,6 +425,9 @@ def _sfdp_params_check(match):
             or query.device != attn_mask.device
         ):
             return False
+    return True
+
+def _sfdp_params_check2(match):
     return True
 
 
@@ -545,6 +571,14 @@ def _sfdp_init():
             [g(), g(), g(), c()],
             {},
             _sfdp_scale_factor_check(aten.div.Tensor),
+        ),
+        (
+            _sfdp_pattern_16,
+            _sfdp_replacement_16,
+            [gp(), gp(), gp()],
+            {},
+            # _sfdp_scale_factor_check(aten.div.Tensor),
+            _sfdp_params_check2,
         ),
     ]:
         args = [*args, *workaround.values()]
